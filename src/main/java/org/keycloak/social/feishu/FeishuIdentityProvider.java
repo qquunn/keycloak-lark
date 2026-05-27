@@ -27,9 +27,10 @@ import org.keycloak.broker.oidc.mappers.AbstractJsonUserAttributeMapper;
 import org.keycloak.broker.provider.AuthenticationRequest;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.broker.provider.IdentityBrokerException;
-import org.keycloak.broker.provider.util.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttp;
 import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.events.EventBuilder;
+import org.keycloak.http.simple.SimpleHttpRequest;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
@@ -133,7 +134,7 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
     protected BrokeredIdentityContext extractIdentityFromProfile(EventBuilder event, JsonNode profile) {
         logger.debug("Received json Profile : " + profile);
         String unionID = getJsonProperty(profile, FEISHU_PROFILE_UNION_ID);
-        BrokeredIdentityContext user = new BrokeredIdentityContext(unionID);
+        BrokeredIdentityContext user = new BrokeredIdentityContext(unionID, getConfig());
 
 
         String email = getJsonProperty(profile, FEISHU_PROFILE_ENTERPRISE_EMAIL,
@@ -198,7 +199,6 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
         user.setUserAttribute(FEISHU_PROFILE_IS_UNJOIN, getJsonProperty(profile.get(FEISHU_PROFILE_STATUS), FEISHU_PROFILE_IS_UNJOIN));
         user.setUserAttribute(FEISHU_PROFILE_IS_EXITED, getJsonProperty(profile.get(FEISHU_PROFILE_STATUS), FEISHU_PROFILE_IS_EXITED));
 
-        user.setIdpConfig(getConfig());
         user.setIdp(this);
         AbstractJsonUserAttributeMapper.storeUserProfileForMapper(user, profile, getConfig().getAlias());
         return user;
@@ -211,14 +211,16 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
     protected BrokeredIdentityContext doGetFederatedIdentity(String userAccessToken) {
         try {
             //获取用户信息profile
-            JsonNode profile = SimpleHttp.doGet(PROFILE_URL, session).auth(userAccessToken).asJson();
+            JsonNode profile = SimpleHttp.create(session).doGet(PROFILE_URL).auth(userAccessToken).asJson();
+            logger.info("Feishu profile: " + profile);
             if (profile.has("error") && !profile.get("error").isNull()) {
                 throw new IdentityBrokerException("Error in Microsoft Graph API response. Payload: " + profile.toString());
             }
-            String userId = profile.get("data").get("user_id").asText();
+            String userId = profile.get("data").get("union_id").asText();
 
             //获取用户详情
             JsonNode userDetail = getUserDetailByAppAccessTokenAndUserId(getAppAccessToken(), userId);
+            logger.info("Feishu userDetail: " + userDetail);
             return extractIdentityFromProfile(null, userDetail);
         } catch (Exception e) {
             throw new IdentityBrokerException("Could not obtain user profile from Feishu", e);
@@ -237,7 +239,7 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
         Map<String, String> requestBody = new HashMap<>();
         requestBody.put("app_id", appId);
         requestBody.put("app_secret", getConfig().getClientSecret());
-        JsonNode responseJson = SimpleHttp.doPost(APP_TOKEN_URL, session)
+        JsonNode responseJson = SimpleHttp.create(session).doPost(APP_TOKEN_URL)
                 .header("Content-Type", "application/json; charset=utf-8")
                 .json(requestBody).asJson();
         if (responseJson.get("code").asInt(-1) != 0) {
@@ -305,7 +307,7 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
          * @return 存储在 Keycloak 中详细的用户信息
          */
         @Override
-        public SimpleHttp generateTokenRequest(String authorizationCode) {
+        public SimpleHttpRequest generateTokenRequest(String authorizationCode) {
             try {
                 String appToken = feishuIdentityProvider.getAppAccessToken(); //获取 app access token
                 //构造 获取user access token 请求
@@ -313,7 +315,7 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
                 requestBody.put(OAUTH2_PARAMETER_GRANT_TYPE, OAUTH2_GRANT_TYPE_AUTHORIZATION_CODE);
                 requestBody.put(OAUTH2_PARAMETER_CODE, authorizationCode);
                 logger.info("code exchange access_token, code:" + authorizationCode + ", appToken: " + appToken);
-                return SimpleHttp.doPost(TOKEN_URL, session)
+                return SimpleHttp.create(session).doPost(TOKEN_URL)
                         .header("Authorization", "Bearer " + appToken)
                         .header("Content-Type", "application/json; charset=utf-8")
                         .json(requestBody);
@@ -336,9 +338,9 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
      */
     private JsonNode getUserDetailByAppAccessTokenAndUserId(String appAccessToken, String userId) throws Exception {
         String userDetailWithUserIdUrl = USER_DETAIL_URL + userId;
-        JsonNode responseJson = SimpleHttp.doGet(userDetailWithUserIdUrl, session)
+        JsonNode responseJson = SimpleHttp.create(session).doGet(userDetailWithUserIdUrl)
                 .header("Authorization", "Bearer " + appAccessToken)
-                .param("user_id_type", "user_id")
+                .param("user_id_type", "union_id")
                 .asJson();
         if (responseJson.get("code").asInt(-1) != 0) {
             logger.warn("Can't get user detail info , response :" + responseJson);
@@ -358,7 +360,7 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
     private String getDepartmentName(String departmentId) {
         try {
             String userDetailWithUserIdUrl = DEPARTMENT_NAME_URL + departmentId;
-            JsonNode responseJson = SimpleHttp.doGet(userDetailWithUserIdUrl, session)
+            JsonNode responseJson = SimpleHttp.create(session).doGet(userDetailWithUserIdUrl)
                     .header("Authorization", "Bearer " + getAppAccessToken())
                     //.param("department_id_type", "department_id")
                     .asJson();
