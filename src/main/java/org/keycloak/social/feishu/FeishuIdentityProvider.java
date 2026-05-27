@@ -71,8 +71,9 @@ public class FeishuIdentityProvider extends AbstractOAuth2IdentityProvider<OAuth
 
     public static final String FEISHU_APP_ID_PARAM = "app_id";
 
+    // 2026-05-27 13:36:26,569 ERROR [org.keycloak.broker.oidc.AbstractOAuth2IdentityProvider] (executor-thread-63) Failed to make identity provider oauth callback: org.keycloak.broker.provider.IdentityBrokerException: No access token available in OAuth server response: {"code":20014,"message":"The app access token passed is invalid. Please check the value."}
     private static final Cache<String, String> feishuCache = CacheBuilder.newBuilder()
-            .expireAfterWrite(5600, TimeUnit.SECONDS).build();
+            .expireAfterWrite(60, TimeUnit.SECONDS).build();
     private static final String feishuAppAccessToken = "feishuAppAccessToken";
 
     public static final String FEISHU_PROFILE_MOBILE = "mobile";
